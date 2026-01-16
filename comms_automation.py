@@ -1,8 +1,6 @@
 import streamlit as st
 import requests
-from docx import Document
-from docx.shared import RGBColor
-from io import BytesIO
+import html
 
 # Common templates
 TEMPLATES = {
@@ -109,71 +107,20 @@ Keep all X placeholders intact for mail merge. Match the tone and style of the o
 
     return call_openrouter(api_key, model, prompt)
 
-def create_hyperlinked_docx(template_text, links_dict):
-    """Create a .docx with hyperlinked text"""
-    doc = Document()
+def create_hyperlinked_html(template_text, links_dict):
+    """Create HTML with hyperlinked text"""
+    html_text = html.escape(template_text)
     
-    # Split text into lines
-    lines = template_text.split('\n')
+    # Replace each link category with a hyperlink
+    for category, url in links_dict.items():
+        escaped_category = html.escape(category)
+        hyperlink = f'<a href="{html.escape(url)}" style="color: #0563C1; text-decoration: underline;">{escaped_category}</a>'
+        html_text = html_text.replace(escaped_category, hyperlink)
     
-    for line in lines:
-        paragraph = doc.add_paragraph()
-        
-        # Check if any link category appears in this line
-        link_found = False
-        for category, url in links_dict.items():
-            if category in line:
-                # Split the line around the category text
-                parts = line.split(category)
-                if len(parts) == 2:
-                    # Add text before link
-                    paragraph.add_run(parts[0])
-                    # Add hyperlink
-                    add_hyperlink(paragraph, url, category)
-                    # Add text after link
-                    paragraph.add_run(parts[1])
-                    link_found = True
-                    break
-        
-        # If no link found, add the line as-is
-        if not link_found:
-            paragraph.add_run(line)
+    # Convert newlines to <br> tags
+    html_text = html_text.replace('\n', '<br>')
     
-    return doc
-
-def add_hyperlink(paragraph, url, text):
-    """Add a hyperlink to a paragraph"""
-    # This adds the relationship for the hyperlink
-    part = paragraph.part
-    r_id = part.relate_to(url, 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', is_external=True)
-    
-    # Create the hyperlink element
-    hyperlink = paragraph._element  # pylint: disable=protected-access
-    hyperlink = hyperlink.makeelement('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hyperlink')
-    hyperlink.set('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id', r_id)
-    
-    # Create run element for the hyperlink text
-    run = hyperlink.makeelement('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
-    r_pr = run.makeelement('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
-    
-    # Style for hyperlink (blue and underlined)
-    color = r_pr.makeelement('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color')
-    color.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '0563C1')
-    r_pr.append(color)
-    
-    u = r_pr.makeelement('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}u')
-    u.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', 'single')
-    r_pr.append(u)
-    
-    run.append(r_pr)
-    
-    # Add text
-    text_elem = run.makeelement('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
-    text_elem.text = text
-    run.append(text_elem)
-    
-    hyperlink.append(run)
-    paragraph._element.append(hyperlink)  # pylint: disable=protected-access
+    return f'<div style="font-family: Arial, sans-serif; line-height: 1.6; white-space: pre-wrap;">{html_text}</div>'
 
 # Streamlit UI
 st.set_page_config(page_title="Comms Automation Tool", page_icon="✉️", layout="wide")
@@ -266,9 +213,9 @@ with col2:
     
     st.markdown("---")
     
-    st.header("🚀 Generate Document")
+    st.header("🚀 Generate Communication")
     
-    if st.button("Generate Hyperlinked Document", type="primary", use_container_width=True):
+    if st.button("Generate Hyperlinked Communication", type="primary", use_container_width=True):
         # Validation
         if not template_text:
             st.error("Please select or enter a template!")
@@ -279,7 +226,7 @@ with col2:
         elif use_ai and not ai_instructions:
             st.error("Please provide AI instructions or uncheck 'Use AI'!")
         else:
-            with st.spinner("Generating your document..."):
+            with st.spinner("Generating your communication..."):
                 final_template = template_text
                 
                 # AI customization if enabled
@@ -318,25 +265,29 @@ with col2:
                 # Create links dictionary
                 links_dict = {link['category']: link['url'] for link in st.session_state.links}
                 
-                # Generate document
-                doc = create_hyperlinked_docx(final_template, links_dict)
+                # Generate HTML with hyperlinks
+                html_output = create_hyperlinked_html(final_template, links_dict)
                 
-                # Save to BytesIO
-                doc_io = BytesIO()
-                doc.save(doc_io)
-                doc_io.seek(0)
+                st.success("✅ Communication generated successfully!")
                 
-                # Download button
-                st.download_button(
-                    label="📥 Download .docx",
-                    data=doc_io,
-                    file_name="communication_template.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
-                )
+                # Display the hyperlinked version
+                st.markdown("### 📋 Your Hyperlinked Communication")
+                st.info("💡 **How to use:** Click inside the box below, press Ctrl+A (Cmd+A on Mac) to select all, then Ctrl+C (Cmd+C) to copy. Paste directly into Gmail - all hyperlinks will be preserved!")
                 
-                st.success("✅ Document generated successfully!")
-                st.info("💡 Open the .docx file and use it in your Gmail mail merge. All X fields are preserved for merging.")
+                # Display in a container that can be easily copied
+                st.markdown(html_output, unsafe_allow_html=True)
+                
+                st.markdown("---")
+                
+                # Also provide plain text version with markdown links as backup
+                with st.expander("📄 Alternative: Plain text with markdown links"):
+                    markdown_text = final_template
+                    for category, url in links_dict.items():
+                        markdown_text = markdown_text.replace(category, f"[{category}]({url})")
+                    st.code(markdown_text, language=None)
+                    st.caption("Copy this version if hyperlinks don't paste correctly")
+                
+                st.info("💡 All X fields are preserved for your Gmail mail merge!")
 
 # Footer
 st.markdown("---")
